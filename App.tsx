@@ -46,7 +46,12 @@ const App: React.FC = () => {
   // UI State
   const [aiPrompt, setAiPrompt] = useState("");
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [vipCode, setVipCode] = useState(""); // VIP Kodu inputu
+  
+  // Leaderboard State
   const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
+  const [isLeaderboardLoading, setIsLeaderboardLoading] = useState(false);
+
   const [session, setSession] = useState<any>(null);
   
   // Auth State
@@ -84,6 +89,37 @@ const App: React.FC = () => {
     initializeGame();
     supabase.auth.getSession().then(({ data: { session } }) => { if(session) setSession(session); });
   }, [initializeGame]);
+
+  // Sekme değiştiğinde yapılacaklar
+  useEffect(() => {
+    if (activeTab === 'leaderboard') {
+      fetchLeaderboard();
+    }
+  }, [activeTab]);
+
+  const fetchLeaderboard = async () => {
+    if (isLeaderboardLoading) return;
+    setIsLeaderboardLoading(true);
+    
+    // Küçük bir gecikme ekleyerek UI'ın kilitlenmesini önle (Main thread yield)
+    await new Promise(r => setTimeout(r, 50));
+
+    try {
+        const { data } = await supabase.from('profiles').select('*');
+        if (data) {
+            // Veriyi işle: Sırala ve sadece ilk 50 kişiyi al (Performans için kritik)
+            const sortedData = (data as LeaderboardEntry[])
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 50);
+            
+            setLeaderboardData(sortedData);
+        }
+    } catch (error) {
+        console.error("Leaderboard fetch error:", error);
+    } finally {
+        setIsLeaderboardLoading(false);
+    }
+  };
 
   // --- SÜRÜKLE BIRAK ---
 
@@ -239,6 +275,25 @@ const App: React.FC = () => {
           localStorage.setItem('bgUrl', bg);
       } catch { showFeedback("Hata!"); }
       setIsAiLoading(false);
+  };
+
+  const handleRedeemCode = async () => {
+      if (!vipCode) return;
+      
+      // VIP Kodu Kontrolü (Örn: NEON2024)
+      if (vipCode.trim().toUpperCase() === 'NEON2024') {
+          setGameState(prev => ({ ...prev, isVip: true }));
+          localStorage.setItem('isVip', 'true');
+          
+          if (session) {
+              await supabase.auth.updateUser({ data: { isVip: true } });
+          }
+          
+          showFeedback("VIP KAZANDIN! 👑");
+          setVipCode("");
+      } else {
+          showFeedback("Geçersiz Kod ❌");
+      }
   };
 
   const handleAuth = async () => {
@@ -407,6 +462,21 @@ const App: React.FC = () => {
 
                           {activeTab === 'shop' && (
                               <div className="space-y-6">
+                                  {/* VIP Kod Bölümü */}
+                                  <div className="p-6 rounded-2xl bg-gradient-to-br from-yellow-500/10 to-orange-500/10 border border-yellow-500/20">
+                                      <h3 className="font-bold text-xl mb-4 text-yellow-500 flex items-center gap-2">👑 PROMOSYON KODU</h3>
+                                      <div className="flex gap-2">
+                                          <input 
+                                              value={vipCode} 
+                                              onChange={e=>setVipCode(e.target.value)} 
+                                              placeholder="KODU GİR (Örn: NEON2024)" 
+                                              className="flex-1 p-4 bg-black/50 rounded-xl border border-white/10 outline-none focus:border-yellow-500 uppercase font-mono"
+                                          />
+                                          <button onClick={handleRedeemCode} className="px-6 bg-yellow-600 rounded-xl font-bold hover:bg-yellow-500 transition-colors">OK</button>
+                                      </div>
+                                      <p className="text-xs text-white/30 mt-2">Yapımcı kodunu girerek VIP özelliklerini açabilirsin.</p>
+                                  </div>
+
                                   <div className="p-6 rounded-2xl bg-white/5 border border-white/10">
                                       <h3 className="font-bold text-xl mb-4 flex items-center gap-2">✨ AI Tema Oluşturucu <span className="text-xs bg-yellow-500 text-black px-2 py-0.5 rounded font-black">VIP</span></h3>
                                       <input value={aiPrompt} onChange={e=>setAiPrompt(e.target.value)} placeholder="Örn: Cyberpunk orman, neon şehir..." className="w-full p-4 bg-black/50 rounded-xl border border-white/10 mb-4 focus:border-cyan-500 outline-none" />
@@ -419,19 +489,32 @@ const App: React.FC = () => {
 
                           {activeTab === 'leaderboard' && (
                               <div className="space-y-2">
-                                  <button onClick={() => supabase.from('profiles').select('*').then(({data}: any) => setLeaderboardData(data))} className="text-cyan-400 text-sm font-bold mb-4 hover:underline">Yenile ↻</button>
-                                  {leaderboardData.map((l, i) => (
-                                      <div key={i} className="flex items-center justify-between p-4 rounded-xl bg-white/5 border border-white/5">
-                                          <div className="flex items-center gap-4">
-                                              <span className="font-black text-white/20 w-6 text-center">{i+1}</span>
-                                              <div className="flex flex-col">
-                                                  <span className="font-bold">{l.name}</span>
-                                                  <span className="text-xs text-white/40">{l.country}</span>
+                                  <button onClick={fetchLeaderboard} className="text-cyan-400 text-sm font-bold mb-4 hover:underline flex items-center gap-2">
+                                      {isLeaderboardLoading ? 'Yükleniyor...' : 'Yenile ↻'}
+                                  </button>
+                                  
+                                  {isLeaderboardLoading && leaderboardData.length === 0 ? (
+                                      <div className="text-center py-10 text-white/30 animate-pulse">Liderler Yükleniyor...</div>
+                                  ) : (
+                                      leaderboardData.map((l, i) => (
+                                          <div key={i} className="flex items-center justify-between p-4 rounded-xl bg-white/5 border border-white/5">
+                                              <div className="flex items-center gap-4">
+                                                  <span className={`font-black w-6 text-center ${i < 3 ? 'text-yellow-400 text-xl' : 'text-white/20'}`}>
+                                                      {i < 3 ? ['🥇', '🥈', '🥉'][i] : i + 1}
+                                                  </span>
+                                                  <div className="flex flex-col">
+                                                      <span className="font-bold">{l.name}</span>
+                                                      <span className="text-xs text-white/40">{l.country}</span>
+                                                  </div>
                                               </div>
+                                              <span className="font-mono font-bold text-cyan-400">{l.score.toLocaleString()}</span>
                                           </div>
-                                          <span className="font-mono font-bold text-cyan-400">{l.score.toLocaleString()}</span>
-                                      </div>
-                                  ))}
+                                      ))
+                                  )}
+                                  
+                                  {leaderboardData.length === 0 && !isLeaderboardLoading && (
+                                      <div className="text-center py-10 text-white/20">Henüz kayıt yok. İlk sen ol!</div>
+                                  )}
                               </div>
                           )}
 
