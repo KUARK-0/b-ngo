@@ -1,0 +1,5 @@
+{
+  "name": "Neon Block Bingo AI",
+  "description": "A vibrant, colorful block puzzle game where clearing rows and columns triggers explosive feedback and high-energy encouragement. Includes an integrated Gemini-powered AI theme generator to customize your game world's aesthetics.",
+  "requestFramePermissions": []
+}
