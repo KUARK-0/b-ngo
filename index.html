@@ -4,137 +4,58 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Neon Block Bingo AI</title>
-    <!-- Tailwind CSS (Basitlik için CDN korunmuştur, prodüksiyonda package.json üzerinden kurulabilir) -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-        // Tarayıcıda process hatasını önlemek için global tanımlama
         window.process = window.process || { env: { API_KEY: '' } };
     </script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;800;900&family=Rajdhani:wght@500;600;700&display=swap');
-
-        :root {
-            --neon-blue: #00f3ff;
-            --neon-pink: #ff00ff;
-            --glass-bg: rgba(255, 255, 255, 0.05);
-            --glass-border: rgba(255, 255, 255, 0.1);
-        }
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@600;900&family=Rajdhani:wght@600;700&display=swap');
 
         body {
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-            background-color: #020617; /* Slate 950 */
+            background-color: #020617;
             touch-action: none;
-            -webkit-user-select: none;
             user-select: none;
-            position: fixed;
-            width: 100%;
-            height: 100%;
+            -webkit-user-select: none;
+            overflow: hidden;
             font-family: 'Rajdhani', sans-serif;
             color: white;
         }
 
-        /* Modern Glassmorphism Panel */
+        /* Performanslı Cam Efekti (Blur azaltıldı) */
         .glass-panel {
-            background: rgba(15, 23, 42, 0.6); /* Daha koyu, daha premium */
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.4), inset 0 0 20px rgba(255, 255, 255, 0.02);
-            transition: all 0.3s ease;
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            /* Mobilde blur çok kasar, sadece destekleyenlerde ve düşük seviyede */
+            @supports (backdrop-filter: blur(8px)) {
+                backdrop-filter: blur(8px);
+                background: rgba(15, 23, 42, 0.6);
+            }
         }
 
-        .glass-button {
-            background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0));
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255,255,255,0.15);
-            box-shadow: 0 4px 15px 0 rgba(0,0,0,0.3);
-        }
-
-        /* VIP Blur Effect */
-        .vip-blur-container {
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .vip-blurred-content {
-            filter: blur(12px) brightness(0.6) grayscale(0.5);
-            pointer-events: none;
-            user-select: none;
-            transition: filter 0.5s ease;
-        }
-
-        .vip-lock-overlay {
-            position: absolute;
-            inset: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            z-index: 10;
-            background: rgba(0,0,0,0.2); /* Hafif karartma */
-            animation: fadeIn 0.5s ease-out;
-        }
-
-        /* Animations */
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
+        /* Basit Animasyonlar */
         @keyframes pop {
             0% { transform: scale(1); filter: brightness(1); }
-            50% { transform: scale(1.2) rotate(5deg); filter: brightness(2) hue-rotate(90deg); opacity: 0.8; }
-            100% { transform: scale(0); filter: brightness(3); opacity: 0; }
+            50% { transform: scale(1.1); filter: brightness(1.5); }
+            100% { transform: scale(0); opacity: 0; }
         }
 
         .block-explode {
-            animation: pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
-            z-index: 10;
+            animation: pop 0.3s ease-out forwards;
+            will-change: transform, opacity; /* GPU Hızlandırma */
         }
 
         .bingo-text {
             font-family: 'Orbitron', sans-serif;
-            animation: bingo-bounce 0.8s cubic-bezier(0.68, -0.55, 0.265, 1.55) infinite;
+            animation: bounce 0.8s infinite;
         }
 
-        @keyframes bingo-bounce {
-            0%, 100% { transform: scale(1); text-shadow: 0 0 20px rgba(255,255,255,0.8); }
-            50% { transform: scale(1.1); text-shadow: 0 0 40px rgba(34,211,238,1); }
+        @keyframes bounce {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
         }
 
-        /* Staggered List Animation */
-        .stagger-item {
-            animation: slideUp 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
-            opacity: 0;
-            transform: translateY(20px);
-        }
-        /* JS ile dinamik delay eklenecek, fallback: */
-        .stagger-item:nth-child(1) { animation-delay: 0.05s; }
-        .stagger-item:nth-child(2) { animation-delay: 0.1s; }
-        .stagger-item:nth-child(3) { animation-delay: 0.15s; }
-        .stagger-item:nth-child(4) { animation-delay: 0.2s; }
-        .stagger-item:nth-child(5) { animation-delay: 0.25s; }
-        .stagger-item:nth-child(n+6) { animation-delay: 0.3s; }
-
-        @keyframes slideUp {
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .no-scrollbar::-webkit-scrollbar {
-            display: none;
-        }
-        .no-scrollbar {
-            -ms-overflow-style: none;
-            scrollbar-width: none;
-        }
-
-        @supports (-webkit-touch-callout: none) {
-            .h-screen {
-                height: -webkit-fill-available;
-            }
-        }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 <script type="importmap">
 {

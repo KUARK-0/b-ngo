@@ -1,30 +1,31 @@
 
-import React from 'react';
+import React, { memo } from 'react';
 import { Piece, ThemeConfig } from '../types';
 
 interface BlockPieceProps {
   piece: Piece;
   themeConfig: ThemeConfig;
-  isSelected?: boolean;
   onSelect?: (piece: Piece) => void;
-  isMobile: boolean;
+  isMobile?: boolean; // Artık CSS ile hallediliyor ama prop hatası vermemesi için kalsın
 }
 
-const BlockPiece: React.FC<BlockPieceProps> = ({ piece, themeConfig, isSelected, onSelect, isMobile }) => {
-  const cellSize = isMobile ? 26 : 34;
-
+const BlockPiece: React.FC<BlockPieceProps> = ({ piece, themeConfig, onSelect }) => {
+  // Hücre boyutu - Mobil ve Desktop için responsive
+  // Mobilde parmakla tutması kolay olsun diye biraz daha büyük alan kaplayacak ama görseli dengeli olacak
+  
   return (
     <div
-      onClick={() => onSelect?.(piece)}
-      className={`
-        relative p-2 rounded-2xl transition-all duration-300 cursor-pointer
-        ${isSelected ? 'bg-white/20 scale-110 shadow-[0_0_30px_rgba(255,255,255,0.3)] ring-2 ring-white' : 'hover:bg-white/5'}
-      `}
+      onPointerDown={(e) => {
+        // Mobilde kaydırmayı engelle
+        e.preventDefault();
+        onSelect?.(piece);
+      }}
+      className="relative p-2 rounded-xl cursor-grab active:cursor-grabbing hover:bg-white/5 transition-transform active:scale-95 touch-none select-none"
       style={{
         display: 'grid',
-        gridTemplateColumns: `repeat(${piece.shape[0].length}, ${cellSize}px)`,
-        gridTemplateRows: `repeat(${piece.shape.length}, ${cellSize}px)`,
-        gap: '5px'
+        gridTemplateColumns: `repeat(${piece.shape[0].length}, 1fr)`,
+        gap: '4px',
+        width: `${piece.shape[0].length * 32}px` // Genişliği içeriğe göre sabitle
       }}
     >
       {piece.shape.map((row, rIdx) =>
@@ -32,11 +33,11 @@ const BlockPiece: React.FC<BlockPieceProps> = ({ piece, themeConfig, isSelected,
           <div
             key={`${rIdx}-${cIdx}`}
             className={`
-              w-full h-full rounded-lg border border-white/10 flex items-center justify-center text-[18px]
-              ${cell ? `bg-gradient-to-br ${themeConfig.gradients[piece.color]} shadow-[inset_0_0_12px_rgba(255,255,255,0.5)]` : 'opacity-0'}
+              w-7 h-7 sm:w-8 sm:h-8 aspect-square rounded flex items-center justify-center text-sm shadow-sm
+              ${cell ? `bg-gradient-to-br ${themeConfig.gradients[piece.color]} border border-white/10` : 'opacity-0 pointer-events-none'}
             `}
           >
-             {cell && <span className="drop-shadow-[0_2px_2px_rgba(0,0,0,0.5)] select-none leading-none">{themeConfig.icons[piece.color]}</span>}
+             {cell && <span className="text-base sm:text-lg filter drop-shadow-md select-none">{themeConfig.icons[piece.color]}</span>}
           </div>
         ))
       )}
@@ -44,4 +45,5 @@ const BlockPiece: React.FC<BlockPieceProps> = ({ piece, themeConfig, isSelected,
   );
 };
 
-export default BlockPiece;
+// Gereksiz render'ı önlemek için memo
+export default memo(BlockPiece);
