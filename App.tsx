@@ -18,6 +18,8 @@ const SIMPLE_THEME: ThemeConfig = {
   gradients: COLOR_MAP
 };
 
+const TOUCH_OFFSET_Y = 85; // Parmağın bloğu kapatmasını önlemek için yukarı kaydırma miktarı
+
 const App: React.FC = () => {
   // --- STATE ---
   const [gameState, setGameState] = useState<GameState>(() => ({
@@ -46,7 +48,10 @@ const App: React.FC = () => {
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
   const [session, setSession] = useState<any>(null);
-  const [authForm, setAuthForm] = useState({ email: '', password: '' });
+  
+  // Auth State
+  const [isLoginMode, setIsLoginMode] = useState(true);
+  const [authForm, setAuthForm] = useState({ email: '', password: '', username: '' });
 
   // Refs
   const gridRef = useRef<HTMLDivElement>(null);
@@ -84,27 +89,42 @@ const App: React.FC = () => {
 
   const handlePointerDown = (e: React.PointerEvent, piece: Piece) => {
     if (gameState.isGameOver || activeTab !== 'game') return;
-    if (gridRef.current) gridRectRef.current = gridRef.current.getBoundingClientRect();
+    
+    // Grid konumunu güncelle (Resize vb. durumlara karşı taze bilgi)
+    if (gridRef.current) {
+        gridRectRef.current = gridRef.current.getBoundingClientRect();
+    }
 
+    // Pointer capture önemli: parmak hızlı hareket etse bile olayı kaçırmamalı
     (e.target as Element).setPointerCapture(e.pointerId);
+
     setDraggedPiece(piece);
     setDragPos({ x: e.clientX, y: e.clientY });
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (!draggedPiece || !gridRectRef.current) return;
+    if (!draggedPiece) return;
+    
+    // Sürükleme pozisyonunu güncelle
     setDragPos({ x: e.clientX, y: e.clientY });
+
+    // Eğer grid bilgisi yoksa (örn. oyun başlamadıysa) çık
+    if (!gridRectRef.current) return;
 
     const rect = gridRectRef.current;
     const cellSize = rect.width / GRID_SIZE;
     
+    // Fare/Parmak pozisyonu
     const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
+    // Y ekseninde offset uyguluyoruz ki parmak bloğu kapatmasın (daha iyi görüş)
+    const mouseY = (e.clientY - TOUCH_OFFSET_Y) - rect.top;
 
-    if (mouseX > -cellSize/2 && mouseX < rect.width + cellSize/2 && mouseY > -cellSize/2 && mouseY < rect.height + cellSize/2) {
+    // Grid sınırları içinde mi? (Biraz toleranslı)
+    if (mouseX > -cellSize && mouseX < rect.width + cellSize && mouseY > -cellSize && mouseY < rect.height + cellSize) {
         const pieceW = draggedPiece.shape[0].length * cellSize;
         const pieceH = draggedPiece.shape.length * cellSize;
 
+        // Bloğun merkezini hesapla ve hücreye snap et
         const c = Math.floor((mouseX - pieceW / 2 + cellSize / 2) / cellSize);
         const r = Math.floor((mouseY - pieceH / 2 + cellSize / 2) / cellSize);
         
@@ -221,8 +241,30 @@ const App: React.FC = () => {
       setIsAiLoading(false);
   };
 
+  const handleAuth = async () => {
+      const { email, password, username } = authForm;
+      if (!email || !password) return showFeedback("Bilgileri doldur!");
+
+      if (isLoginMode) {
+          const { error } = await supabase.auth.signInWithPassword({ email, password });
+          if (error) showFeedback(error.message);
+          else window.location.reload();
+      } else {
+          if (!username) return showFeedback("Kullanıcı adı gerekli!");
+          const { error } = await supabase.auth.signUp({ 
+              email, 
+              password,
+              options: { data: { display_name: username } }
+          });
+          if (error) showFeedback(error.message);
+          else {
+              showFeedback("Kayıt Başarılı!");
+              setTimeout(() => window.location.reload(), 1000);
+          }
+      }
+  };
+
   // --- LAYOUT HELPERS ---
-  // SimulationMode açıksa masaüstü özelliklerini (md:) devre dışı bırakıyoruz.
   const desktopSidebarClass = simulationMode ? 'hidden' : 'hidden md:flex';
   const mobileHeaderClass = simulationMode ? 'flex' : 'md:hidden';
   const mobileNavClass = simulationMode ? 'flex' : 'md:hidden';
@@ -328,7 +370,7 @@ const App: React.FC = () => {
                   {/* SAĞ PANEL / ALT PANEL */}
                   <div className={`${rightPanelClass} flex flex-col gap-4 flex-shrink-0 z-10`}>
                       
-                      {/* Desktop Skor Paneli (Simulation Mode'da gizli) */}
+                      {/* Desktop Skor Paneli */}
                       <div className={`${desktopSidebarClass} flex-col glass-panel p-6 rounded-3xl border border-white/10 bg-black/20`}>
                           <div className="flex justify-between items-end border-b border-white/10 pb-4 mb-4">
                               <span className="text-cyan-400 font-bold tracking-widest text-sm">SKOR</span>
@@ -347,7 +389,8 @@ const App: React.FC = () => {
                            )}
                            {gameState.availablePieces.map(p => (
                               <div key={p.id} className="relative z-10 transition-transform hover:scale-105 active:scale-95">
-                                  <BlockPiece piece={p} themeConfig={gameState.themeConfig} onSelect={(pp) => setDraggedPiece(pp)} />
+                                  {/* Event'i yukarıya doğru şekilde taşıyoruz */}
+                                  <BlockPiece piece={p} themeConfig={gameState.themeConfig} onSelect={(pp, e) => handlePointerDown(e, pp)} />
                               </div>
                           ))}
                       </div>
@@ -396,14 +439,45 @@ const App: React.FC = () => {
                               <div className="space-y-4 max-w-sm mx-auto mt-10">
                                   {!session ? (
                                   <div className="flex flex-col gap-4">
-                                      <input value={authForm.email} onChange={e=>setAuthForm({...authForm, email:e.target.value})} placeholder="E-Posta" className="p-4 rounded-xl bg-black/40 border border-white/10" />
-                                      <input type="password" value={authForm.password} onChange={e=>setAuthForm({...authForm, password:e.target.value})} placeholder="Şifre" className="p-4 rounded-xl bg-black/40 border border-white/10" />
-                                      <button onClick={() => supabase.auth.signInWithPassword(authForm).then(({error}: any) => error ? showFeedback(error.message) : window.location.reload())} className="p-4 bg-cyan-600 rounded-xl font-bold hover:bg-cyan-500 transition-colors">GİRİŞ YAP</button>
+                                      <h3 className="text-xl font-bold text-center mb-2">{isLoginMode ? 'Giriş Yap' : 'Kayıt Ol'}</h3>
+                                      
+                                      {!isLoginMode && (
+                                        <input value={authForm.username} onChange={e=>setAuthForm({...authForm, username:e.target.value})} placeholder="Kullanıcı Adı" className="p-4 rounded-xl bg-black/40 border border-white/10 focus:border-cyan-500 outline-none transition-colors" />
+                                      )}
+                                      
+                                      <input value={authForm.email} onChange={e=>setAuthForm({...authForm, email:e.target.value})} placeholder="E-Posta" className="p-4 rounded-xl bg-black/40 border border-white/10 focus:border-cyan-500 outline-none transition-colors" />
+                                      <input type="password" value={authForm.password} onChange={e=>setAuthForm({...authForm, password:e.target.value})} placeholder="Şifre" className="p-4 rounded-xl bg-black/40 border border-white/10 focus:border-cyan-500 outline-none transition-colors" />
+                                      
+                                      <button onClick={handleAuth} className="p-4 bg-gradient-to-r from-cyan-600 to-blue-600 rounded-xl font-bold hover:scale-105 transition-transform shadow-lg shadow-cyan-500/20">
+                                          {isLoginMode ? 'GİRİŞ YAP' : 'KAYIT OL'}
+                                      </button>
+
+                                      <button onClick={() => setIsLoginMode(!isLoginMode)} className="text-sm text-white/50 hover:text-white transition-colors mt-2">
+                                          {isLoginMode ? "Hesabın yok mu? Hemen Kayıt Ol" : "Zaten hesabın var mı? Giriş Yap"}
+                                      </button>
                                   </div>
                                   ) : (
-                                  <div className="text-center">
-                                      <div className="text-xl mb-6">Hoşgeldin, <span className="text-cyan-400 font-bold">{session.user.user_metadata?.display_name}</span></div>
-                                      <button onClick={() => supabase.auth.signOut().then(() => window.location.reload())} className="px-8 py-3 bg-red-500/10 text-red-400 border border-red-500/20 rounded-xl font-bold hover:bg-red-500/20">ÇIKIŞ YAP</button>
+                                  <div className="text-center animate-in fade-in">
+                                      <div className="text-6xl mb-4">{session.user.user_metadata?.avatar || '😎'}</div>
+                                      <div className="text-xl mb-2">Hoşgeldin,</div>
+                                      <div className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-400 mb-8 font-['Orbitron']">
+                                          {session.user.user_metadata?.display_name}
+                                      </div>
+                                      
+                                      <div className="grid grid-cols-2 gap-4 mb-8">
+                                          <div className="p-4 bg-white/5 rounded-2xl border border-white/10">
+                                              <div className="text-xs text-white/40 mb-1">EN YÜKSEK SKOR</div>
+                                              <div className="text-xl font-bold">{gameState.highScore}</div>
+                                          </div>
+                                          <div className="p-4 bg-white/5 rounded-2xl border border-white/10">
+                                              <div className="text-xs text-white/40 mb-1">ÜYELİK</div>
+                                              <div className="text-xl font-bold text-yellow-500">{gameState.isVip ? 'VIP' : 'Standart'}</div>
+                                          </div>
+                                      </div>
+
+                                      <button onClick={() => supabase.auth.signOut().then(() => window.location.reload())} className="w-full px-8 py-4 bg-red-500/10 text-red-400 border border-red-500/20 rounded-xl font-bold hover:bg-red-500/20 transition-colors">
+                                          ÇIKIŞ YAP
+                                      </button>
                                   </div>
                                   )}
                               </div>
@@ -442,7 +516,8 @@ const App: React.FC = () => {
             style={{ 
                 position: 'fixed', 
                 left: dragPos.x, 
-                top: dragPos.y, 
+                // Parmağın bloğu kapatmaması için görseli yukarı kaydırıyoruz
+                top: dragPos.y - TOUCH_OFFSET_Y, 
                 transform: 'translate(-50%, -50%) scale(1.1)', 
                 pointerEvents: 'none', 
                 zIndex: 100,

@@ -1,24 +1,19 @@
-
 import React, { memo } from 'react';
 import { Piece, ThemeConfig } from '../types';
 
 interface BlockPieceProps {
   piece: Piece;
   themeConfig: ThemeConfig;
-  onSelect?: (piece: Piece) => void;
-  isMobile?: boolean; // Artık CSS ile hallediliyor ama prop hatası vermemesi için kalsın
+  onSelect?: (piece: Piece, e: React.PointerEvent) => void;
 }
 
 const BlockPiece: React.FC<BlockPieceProps> = ({ piece, themeConfig, onSelect }) => {
-  // Hücre boyutu - Mobil ve Desktop için responsive
-  // Mobilde parmakla tutması kolay olsun diye biraz daha büyük alan kaplayacak ama görseli dengeli olacak
-  
   return (
     <div
       onPointerDown={(e) => {
-        // Mobilde kaydırmayı engelle
+        // Mobilde kaydırmayı engelle ve event'i yukarı taşı
         e.preventDefault();
-        onSelect?.(piece);
+        onSelect?.(piece, e);
       }}
       className="relative p-2 rounded-xl cursor-grab active:cursor-grabbing hover:bg-white/5 transition-transform active:scale-95 touch-none select-none"
       style={{
@@ -45,5 +40,4 @@ const BlockPiece: React.FC<BlockPieceProps> = ({ piece, themeConfig, onSelect })
   );
 };
 
-// Gereksiz render'ı önlemek için memo
 export default memo(BlockPiece);
