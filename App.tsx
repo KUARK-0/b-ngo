@@ -19,6 +19,11 @@ const SIMPLE_THEME: ThemeConfig = {
 };
 
 const App: React.FC = () => {
+  // Varsayılan görünümü ekran genişliğine göre belirle
+  const [viewMode, setViewMode] = useState<'desktop' | 'mobile'>(() => 
+    window.innerWidth < 768 ? 'mobile' : 'desktop'
+  );
+
   const [gameState, setGameState] = useState<GameState>(() => {
     const savedVip = localStorage.getItem('isVip') === 'true';
     return {
@@ -414,13 +419,87 @@ const App: React.FC = () => {
     return list.sort((a, b) => b.score - a.score);
   };
 
-  const isMobile = window.innerWidth < 768;
+  // --- SUB-COMPONENTS FOR LAYOUTS ---
+
+  // Oyun Izgarası (Grid)
+  const GameGrid = ({ isMobile }: { isMobile: boolean }) => (
+    <div className={`relative ${isMobile ? 'w-full max-w-[90vw] aspect-square' : 'h-[85vh] aspect-square'}`}>
+       <div 
+         ref={gridRef} 
+         className={`glass-panel w-full h-full shadow-[0_0_100px_rgba(34,211,238,0.15)] border border-white/10 relative overflow-hidden bg-black/40 backdrop-blur-xl ${isMobile ? 'rounded-2xl p-2' : 'rounded-[2.5rem] p-6'}`}
+         style={{ display: 'grid', gridTemplateColumns: `repeat(${GRID_SIZE}, 1fr)`, gap: isMobile ? '4px' : '8px' }}
+       >
+         <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/5 via-transparent to-pink-500/5 pointer-events-none" />
+         {gameState.grid.map((row, rIdx) => row.map((cell, cIdx) => {
+           const isPreview = previewPos && draggedPiece && rIdx >= previewPos.r && rIdx < previewPos.r + draggedPiece.shape.length && cIdx >= previewPos.c && cIdx < previewPos.c + draggedPiece.shape[0].length && draggedPiece.shape[rIdx - previewPos.r][cIdx - previewPos.c];
+           return (
+             <div 
+               key={`${rIdx}-${cIdx}`} 
+               className={`
+                 relative w-full h-full rounded-lg flex items-center justify-center transition-all duration-200 z-10
+                 ${cell.occupied 
+                    ? `bg-gradient-to-br ${gameState.themeConfig.gradients[cell.color]} shadow-lg scale-[0.95] border border-white/20` 
+                    : 'bg-white/5 border border-white/5 shadow-inner hover:bg-white/10'}
+                 ${cell.exploding ? 'block-explode' : ''} 
+                 ${isPreview ? 'bg-white/40 ring-4 ring-white animate-pulse scale-95 opacity-70' : ''}
+               `}
+             >
+               {cell.occupied && <span className={`${isMobile ? 'text-2xl' : 'text-4xl'} drop-shadow-md filter saturate-150`}>{gameState.themeConfig.icons[cell.color]}</span>}
+             </div>
+           );
+         }))}
+
+         {/* Game Over Overlay */}
+         {isStuck && !gameState.isGameOver && (
+           <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/85 backdrop-blur-2xl border border-white/10 animate-in zoom-in">
+             <h2 className={`${isMobile ? 'text-4xl' : 'text-7xl'} font-black text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-pink-600 mb-6 font-['Orbitron']`}>OYUN BİTTİ</h2>
+             <p className="text-white/60 mb-6 text-xl font-mono">SKOR: <span className="text-white font-bold">{gameState.score}</span></p>
+             <button onClick={restartGame} className="px-8 py-4 bg-gradient-to-r from-red-600 to-pink-600 rounded-2xl font-black text-xl shadow-[0_0_50px_rgba(220,38,38,0.5)] hover:scale-105 transition-all">TEKRAR OYNA</button>
+           </div>
+         )}
+       </div>
+    </div>
+  );
+
+  // Parça Listesi (Pieces)
+  const PiecesList = ({ isMobile }: { isMobile: boolean }) => (
+    <div className={`flex items-center justify-center gap-4 ${isMobile ? 'flex-row w-full h-32 px-2' : 'flex-col w-full h-full'}`}>
+      {gameState.availablePieces.map((piece) => (
+        <div 
+          key={piece.id} 
+          onPointerDown={(e) => handlePointerDown(e, piece)} 
+          className={`
+            cursor-grab active:cursor-grabbing hover:scale-105 transition-transform p-2 rounded-2xl border border-white/5 flex justify-center items-center bg-black/20
+            ${isMobile ? 'min-w-[80px] h-full' : 'w-full p-4'}
+          `}
+        >
+          <BlockPiece piece={piece} themeConfig={gameState.themeConfig} isMobile={isMobile} />
+        </div>
+      ))}
+      {gameState.availablePieces.length === 0 && <div className="text-white/20 text-sm animate-pulse">Yeni bloklar geliyor...</div>}
+    </div>
+  );
+
+  // VIEW MODE TOGGLE BUTTON
+  const ViewToggle = () => (
+    <button 
+      onClick={() => setViewMode(prev => prev === 'desktop' ? 'mobile' : 'desktop')}
+      className="fixed top-4 right-4 z-[60] bg-white/10 hover:bg-white/20 border border-white/20 p-3 rounded-full backdrop-blur-md transition-all shadow-lg group"
+      title={viewMode === 'desktop' ? "Mobil Görünüme Geç" : "Masaüstü Görünüme Geç"}
+    >
+      {viewMode === 'desktop' ? (
+        <span className="text-xl">📱</span>
+      ) : (
+        <span className="text-xl">🖥️</span>
+      )}
+    </button>
+  );
 
   // Render Logic
   return (
     <div className="relative w-full h-screen flex overflow-hidden bg-[#020617] text-white select-none font-sans" onPointerMove={handlePointerMove} onPointerUp={handlePointerUp}>
       
-      {/* Dynamic Background */}
+      {/* Background */}
       <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
         {gameState.backgroundUrl ? (
           <div className="absolute inset-0 bg-cover bg-center transition-all duration-1000 scale-105 opacity-40 blur-[4px]" style={{ backgroundImage: `url(${gameState.backgroundUrl})` }} />
@@ -430,222 +509,227 @@ const App: React.FC = () => {
         <div className="absolute inset-0 bg-black/40" />
       </div>
 
-      {/* --- LEFT SIDEBAR (Navigation) --- */}
-      <div className="relative z-20 w-24 h-full glass-panel border-r border-white/10 flex flex-col items-center py-8 gap-8 shadow-2xl">
-         <div className="text-3xl animate-pulse">🌌</div>
-         <nav className="flex-1 flex flex-col gap-6 w-full px-2">
-            <NavButton active={activeTab === 'game'} onClick={() => setActiveTab('game')} icon="🎮" label="Oyun" />
-            <NavButton active={activeTab === 'leaderboard'} onClick={() => setActiveTab('leaderboard')} icon="🏆" label="Lider" />
-            <NavButton active={activeTab === 'shop'} onClick={() => setActiveTab('shop')} icon="🛒" label="Mağaza" />
-            <NavButton active={activeTab === 'account'} onClick={() => setActiveTab('account')} icon="👤" label="Profil" />
-            <NavButton active={activeTab === 'support'} onClick={() => setActiveTab('support')} icon="❓" label="Yardım" />
-         </nav>
-         <div className="text-[10px] text-white/20 font-mono rotate-90 mb-4 whitespace-nowrap">V 1.0.2 DESKTOP</div>
-      </div>
+      <ViewToggle />
 
-      {/* --- CENTER AREA (Main Content) --- */}
-      <div className="flex-1 relative z-10 h-full flex items-center justify-center p-8">
-        
-        {/* GAME VIEW */}
-        {activeTab === 'game' && (
-          <div className="flex w-full h-full max-w-7xl gap-8 items-center justify-center">
-             
-             {/* Main Grid Container */}
-             <div className="relative h-[85vh] aspect-square">
-                <div 
-                  ref={gridRef} 
-                  className="glass-panel rounded-[2.5rem] p-6 w-full h-full shadow-[0_0_100px_rgba(34,211,238,0.15)] border border-white/10 relative overflow-hidden bg-black/40 backdrop-blur-xl"
-                  style={{ display: 'grid', gridTemplateColumns: `repeat(${GRID_SIZE}, 1fr)`, gap: '8px' }}
-                >
-                  <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/5 via-transparent to-pink-500/5 pointer-events-none" />
-                  {gameState.grid.map((row, rIdx) => row.map((cell, cIdx) => {
-                    const isPreview = previewPos && draggedPiece && rIdx >= previewPos.r && rIdx < previewPos.r + draggedPiece.shape.length && cIdx >= previewPos.c && cIdx < previewPos.c + draggedPiece.shape[0].length && draggedPiece.shape[rIdx - previewPos.r][cIdx - previewPos.c];
-                    return (
-                      <div 
-                        key={`${rIdx}-${cIdx}`} 
-                        className={`
-                          relative w-full h-full rounded-xl flex items-center justify-center transition-all duration-200 z-10
-                          ${cell.occupied 
-                             ? `bg-gradient-to-br ${gameState.themeConfig.gradients[cell.color]} shadow-lg scale-[0.95] border border-white/20` 
-                             : 'bg-white/5 border border-white/5 shadow-inner hover:bg-white/10'}
-                          ${cell.exploding ? 'block-explode' : ''} 
-                          ${isPreview ? 'bg-white/40 ring-4 ring-white animate-pulse scale-95 opacity-70' : ''}
-                        `}
-                      >
-                        {cell.occupied && <span className="text-3xl md:text-4xl drop-shadow-md filter saturate-150">{gameState.themeConfig.icons[cell.color]}</span>}
-                      </div>
-                    );
-                  }))}
-
-                  {/* Game Over Overlay */}
-                  {isStuck && !gameState.isGameOver && (
-                    <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/85 backdrop-blur-2xl rounded-[2.5rem] border border-white/10 animate-in zoom-in">
-                      <h2 className="text-7xl font-black text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-pink-600 mb-6 font-['Orbitron']">OYUN BİTTİ</h2>
-                      <p className="text-white/60 mb-10 text-2xl font-mono">SKOR: <span className="text-white font-bold">{gameState.score}</span></p>
-                      <button onClick={restartGame} className="px-12 py-6 bg-gradient-to-r from-red-600 to-pink-600 rounded-2xl font-black text-2xl shadow-[0_0_50px_rgba(220,38,38,0.5)] hover:scale-105 transition-all">TEKRAR OYNA</button>
-                    </div>
-                  )}
-                </div>
-             </div>
-
-             {/* Right Side: Pieces & Stats */}
-             <div className="w-80 h-[85vh] flex flex-col gap-6">
-                
-                {/* Score Cards */}
-                <div className="glass-panel p-6 rounded-3xl border border-white/10 flex flex-col gap-4">
-                   <div>
-                      <div className="text-xs text-cyan-400 font-bold tracking-widest uppercase mb-1">SKOR</div>
-                      <div className="text-4xl font-black font-['Orbitron'] text-white drop-shadow-[0_0_10px_rgba(34,211,238,0.5)]">{gameState.score}</div>
-                   </div>
-                   <div className="w-full h-px bg-white/10" />
-                   <div>
-                      <div className="text-xs text-pink-400 font-bold tracking-widest uppercase mb-1">REKOR</div>
-                      <div className="text-2xl font-black font-['Orbitron'] text-white/80">{gameState.highScore}</div>
-                   </div>
-                </div>
-
-                {/* Available Pieces */}
-                <div className="flex-1 glass-panel rounded-3xl border border-white/10 p-4 flex flex-col items-center justify-center gap-8 bg-black/20">
-                    <h3 className="text-xs font-bold text-white/30 uppercase tracking-widest">SIRADAKİ BLOKLAR</h3>
-                    {gameState.availablePieces.map((piece) => (
-                      <div key={piece.id} onPointerDown={(e) => handlePointerDown(e, piece)} className="cursor-grab active:cursor-grabbing hover:scale-105 transition-transform p-4 rounded-2xl hover:bg-white/5 bg-black/20 border border-white/5 w-full flex justify-center">
-                        <BlockPiece piece={piece} themeConfig={gameState.themeConfig} isMobile={false} />
-                      </div>
-                    ))}
-                </div>
-
-             </div>
+      {/* --- DESKTOP VIEW --- */}
+      {viewMode === 'desktop' && (
+        <>
+          {/* Left Sidebar */}
+          <div className="relative z-20 w-24 h-full glass-panel border-r border-white/10 flex flex-col items-center py-8 gap-8 shadow-2xl">
+             <div className="text-3xl animate-pulse">🌌</div>
+             <nav className="flex-1 flex flex-col gap-6 w-full px-2">
+                <NavButton active={activeTab === 'game'} onClick={() => setActiveTab('game')} icon="🎮" label="Oyun" />
+                <NavButton active={activeTab === 'leaderboard'} onClick={() => setActiveTab('leaderboard')} icon="🏆" label="Lider" />
+                <NavButton active={activeTab === 'shop'} onClick={() => setActiveTab('shop')} icon="🛒" label="Mağaza" />
+                <NavButton active={activeTab === 'account'} onClick={() => setActiveTab('account')} icon="👤" label="Profil" />
+             </nav>
+             <div className="text-[10px] text-white/20 font-mono rotate-90 mb-4 whitespace-nowrap">V 1.0.3 DSK</div>
           </div>
-        )}
 
-        {/* FEEDBACK OVERLAY (Floating) */}
-        <div className="absolute top-10 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
-            {gameState.feedbackMessage && (
-                <div className={`
-                ${isBingo ? 'text-6xl bingo-text' : 'text-4xl'} 
-                font-black text-center text-transparent bg-clip-text 
-                bg-gradient-to-b from-white to-cyan-300
-                drop-shadow-[0_0_50px_rgba(34,211,238,0.8)]
-                px-8 py-4 rounded-2xl backdrop-blur-sm
-                transition-all duration-300
-                `}>
-                {gameState.feedbackMessage}
-                </div>
-            )}
-        </div>
-
-        {/* OTHER TABS (Simplified for Desktop View) */}
-        {activeTab === 'shop' && (
-           <div className="w-full max-w-4xl glass-panel p-12 rounded-[3rem] h-[80vh] overflow-y-auto no-scrollbar border border-white/10">
-               <div className="flex justify-between items-center mb-12">
-                   <h2 className="text-6xl font-black font-['Orbitron'] text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-orange-500">VIP MAĞAZA</h2>
-                   <div className="text-4xl">👑</div>
-               </div>
-               
-               <div className="grid grid-cols-2 gap-8">
-                   <div className="space-y-6">
-                        <h3 className="text-2xl font-bold">Tema Motoru</h3>
-                        <div className="glass-panel p-8 rounded-3xl bg-black/40">
-                             <input 
-                               type="text" 
-                               value={aiPrompt} 
-                               onChange={(e) => setAiPrompt(e.target.value)} 
-                               placeholder="Hayalindeki temayı yaz..." 
-                               className="w-full bg-black/50 border border-white/10 rounded-xl px-6 py-5 text-lg focus:border-indigo-500 outline-none mb-4"
-                               disabled={!gameState.isVip}
-                             />
-                             <button 
-                               onClick={handleUpdateTheme}
-                               className={`w-full py-5 rounded-xl font-bold text-lg shadow-lg ${gameState.isVip ? 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:scale-[1.02]' : 'bg-white/5 text-white/20 cursor-not-allowed'}`}
-                             >
-                               {isAiLoading ? 'YAPAY ZEKA ÇALIŞIYOR...' : 'OLUŞTUR'}
-                             </button>
-                        </div>
-                   </div>
-                   
-                   <div className="space-y-6">
-                       <h3 className="text-2xl font-bold">Promosyon Kodu</h3>
-                       <div className="glass-panel p-8 rounded-3xl bg-black/40 flex flex-col gap-4">
-                           <input 
-                             type="text" 
-                             value={vipCode}
-                             onChange={(e) => setVipCode(e.target.value)}
-                             placeholder="Kodu giriniz" 
-                             className="w-full bg-black/50 border border-white/10 rounded-xl px-6 py-5 text-lg outline-none"
-                           />
-                           <button onClick={applyVipCode} className="w-full py-5 bg-yellow-500 text-black font-bold rounded-xl hover:bg-yellow-400">KODU KULLAN</button>
+          {/* Main Area */}
+          <div className="flex-1 relative z-10 h-full flex items-center justify-center p-8">
+            {activeTab === 'game' && (
+              <div className="flex w-full h-full max-w-7xl gap-8 items-center justify-center">
+                 <GameGrid isMobile={false} />
+                 
+                 <div className="w-80 h-[85vh] flex flex-col gap-6">
+                    <div className="glass-panel p-6 rounded-3xl border border-white/10 flex flex-col gap-4">
+                       <div>
+                          <div className="text-xs text-cyan-400 font-bold tracking-widest uppercase mb-1">SKOR</div>
+                          <div className="text-4xl font-black font-['Orbitron'] text-white drop-shadow-[0_0_10px_rgba(34,211,238,0.5)]">{gameState.score}</div>
                        </div>
-                   </div>
-               </div>
-           </div>
-        )}
-
-        {activeTab === 'leaderboard' && (
-            <div className="w-full max-w-4xl glass-panel p-10 rounded-[3rem] h-[80vh] overflow-y-auto no-scrollbar border border-white/10">
-                <div className="flex justify-between items-end mb-8">
-                    <h2 className="text-5xl font-black font-['Orbitron']">LİDER TABLOSU</h2>
-                    <div className="flex gap-2 bg-white/5 p-1 rounded-xl">
-                        <button onClick={() => setLeaderboardType('GLOBAL')} className={`px-6 py-2 rounded-lg font-bold ${leaderboardType === 'GLOBAL' ? 'bg-cyan-500 text-black' : 'text-white/50'}`}>GENEL</button>
-                        <button onClick={() => setLeaderboardType('VIP')} className={`px-6 py-2 rounded-lg font-bold ${leaderboardType === 'VIP' ? 'bg-yellow-500 text-black' : 'text-white/50'}`}>VIP</button>
+                       <div className="w-full h-px bg-white/10" />
+                       <div>
+                          <div className="text-xs text-pink-400 font-bold tracking-widest uppercase mb-1">REKOR</div>
+                          <div className="text-2xl font-black font-['Orbitron'] text-white/80">{gameState.highScore}</div>
+                       </div>
                     </div>
+                    <div className="flex-1 glass-panel rounded-3xl border border-white/10 p-4 flex flex-col items-center justify-center gap-8 bg-black/20">
+                        <h3 className="text-xs font-bold text-white/30 uppercase tracking-widest">BLOKLAR</h3>
+                        <PiecesList isMobile={false} />
+                    </div>
+                 </div>
+              </div>
+            )}
+            
+            {/* Desktop Tabs Content (Reused Logic) */}
+            {activeTab !== 'game' && <ContentPanel activeTab={activeTab} isMobile={false} />}
+          </div>
+        </>
+      )}
+
+      {/* --- MOBILE VIEW --- */}
+      {viewMode === 'mobile' && (
+        <div className="relative z-10 flex flex-col w-full h-full">
+            
+            {/* Mobile Header (Score) */}
+            <div className="flex justify-between items-center p-4 glass-panel border-b border-white/10 z-20">
+                <div className="flex flex-col">
+                    <span className="text-[10px] text-cyan-400 font-bold">SKOR</span>
+                    <span className="text-2xl font-black font-['Orbitron']">{gameState.score}</span>
                 </div>
-                
-                <div className="space-y-4">
-                    {getFilteredLeaderboard().map((entry, idx) => (
-                        <div key={entry.id} className="glass-panel p-6 rounded-2xl flex items-center gap-6 hover:bg-white/5 transition-colors">
-                            <div className="text-3xl font-black w-12 text-center text-white/30">{idx + 1}</div>
-                            <div className="text-4xl">{entry.avatar}</div>
-                            <div className="flex-1">
-                                <div className="text-xl font-bold">{entry.name} {entry.isVip && '👑'}</div>
-                                <div className="text-sm opacity-50">{COUNTRIES.find(c => c.code === entry.country)?.name}</div>
-                            </div>
-                            <div className="text-3xl font-black text-cyan-400 font-['Orbitron']">{entry.score.toLocaleString()}</div>
+                <div className="text-2xl animate-pulse">🌌</div>
+                <div className="flex flex-col items-end pr-12"> 
+                    <span className="text-[10px] text-pink-400 font-bold">REKOR</span>
+                    <span className="text-xl font-bold text-white/80">{gameState.highScore}</span>
+                </div>
+            </div>
+
+            {/* Mobile Content Area */}
+            <div className="flex-1 overflow-hidden relative flex flex-col items-center justify-center p-2">
+                {activeTab === 'game' && (
+                    <>
+                        <div className="flex-1 flex items-center justify-center w-full">
+                           <GameGrid isMobile={true} />
                         </div>
-                    ))}
-                </div>
-            </div>
-        )}
-
-        {/* Account & Support tabs would follow similar desktop patterns... */}
-        {(activeTab === 'account' || activeTab === 'support') && (
-            <div className="glass-panel p-12 rounded-[3rem] text-center max-w-2xl">
-                <h2 className="text-4xl font-bold mb-4">{activeTab === 'account' ? 'PROFİL' : 'DESTEK'}</h2>
-                <p className="opacity-50">Bu bölüm masaüstü için optimize edildi.</p>
-                {activeTab === 'account' && !session && (
-                    <div className="mt-8 flex flex-col gap-4">
-                        <input className="p-4 rounded-xl bg-white/5 border border-white/10" placeholder="E-Posta" value={email} onChange={e=>setEmail(e.target.value)} />
-                        <input className="p-4 rounded-xl bg-white/5 border border-white/10" type="password" placeholder="Şifre" value={password} onChange={e=>setPassword(e.target.value)} />
-                        <button onClick={handleAuth} className="p-4 bg-cyan-600 rounded-xl font-bold">Giriş Yap / Kayıt Ol</button>
-                    </div>
+                        <div className="h-32 w-full mb-2">
+                           <PiecesList isMobile={true} />
+                        </div>
+                    </>
                 )}
-                {activeTab === 'account' && session && (
-                    <div className="mt-8">
-                        <div className="text-2xl mb-4">Hoşgeldin, {session.user.user_metadata?.display_name}</div>
-                        <button onClick={handleLogout} className="px-8 py-3 bg-red-500/20 text-red-400 rounded-xl">Çıkış Yap</button>
+                {activeTab !== 'game' && (
+                    <div className="w-full h-full overflow-y-auto no-scrollbar p-4 pb-20">
+                        <ContentPanel activeTab={activeTab} isMobile={true} />
                     </div>
                 )}
             </div>
-        )}
 
+            {/* Mobile Bottom Nav */}
+            <div className="h-16 glass-panel border-t border-white/10 flex items-center justify-around px-2 z-30 mb-safe">
+                <MobileNavBtn active={activeTab === 'game'} onClick={() => setActiveTab('game')} icon="🎮" label="Oyun" />
+                <MobileNavBtn active={activeTab === 'leaderboard'} onClick={() => setActiveTab('leaderboard')} icon="🏆" label="Lider" />
+                <MobileNavBtn active={activeTab === 'shop'} onClick={() => setActiveTab('shop')} icon="🛒" label="Market" />
+                <MobileNavBtn active={activeTab === 'account'} onClick={() => setActiveTab('account')} icon="👤" label="Profil" />
+            </div>
+        </div>
+      )}
+
+      {/* Feedback Overlay */}
+      <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 pointer-events-none w-full flex justify-center">
+          {gameState.feedbackMessage && (
+              <div className={`
+              ${isBingo ? 'text-4xl md:text-6xl bingo-text' : 'text-2xl md:text-4xl'} 
+              font-black text-center text-transparent bg-clip-text 
+              bg-gradient-to-b from-white to-cyan-300
+              drop-shadow-[0_0_50px_rgba(34,211,238,0.8)]
+              px-4 py-2 rounded-2xl backdrop-blur-sm
+              transition-all duration-300
+              `}>
+              {gameState.feedbackMessage}
+              </div>
+          )}
       </div>
 
-      {/* DRAG OVERLAY */}
+      {/* Drag Overlay */}
       {draggedPiece && (
         <div 
           className="fixed pointer-events-none z-[100]" 
           style={{ 
             left: dragPos.x, 
             top: dragPos.y, 
-            transform: 'translate(-50%, -50%) scale(1.2)',
+            transform: `translate(-50%, -50%) scale(${viewMode === 'mobile' ? 1.5 : 1.2})`,
             filter: 'drop-shadow(0 0 40px rgba(255,255,255,0.4))'
           }}
         >
-          <BlockPiece piece={draggedPiece} themeConfig={gameState.themeConfig} isMobile={false} />
+          <BlockPiece piece={draggedPiece} themeConfig={gameState.themeConfig} isMobile={viewMode === 'mobile'} />
         </div>
       )}
 
     </div>
   );
+
+  // Helper Functions for Tab Content
+  function ContentPanel({ activeTab, isMobile }: { activeTab: string, isMobile: boolean }) {
+      if (activeTab === 'shop') return (
+           <div className={`w-full glass-panel ${isMobile ? 'p-4 rounded-2xl' : 'p-12 rounded-[3rem] h-[80vh] overflow-y-auto no-scrollbar border border-white/10'}`}>
+               <div className="flex justify-between items-center mb-6">
+                   <h2 className={`${isMobile ? 'text-3xl' : 'text-6xl'} font-black font-['Orbitron'] text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-orange-500`}>VIP MAĞAZA</h2>
+                   <div className="text-4xl">👑</div>
+               </div>
+               
+               <div className={`${isMobile ? 'flex flex-col' : 'grid grid-cols-2'} gap-8`}>
+                   <div className="space-y-4">
+                        <h3 className="text-xl font-bold">Tema Motoru</h3>
+                        <div className="glass-panel p-4 rounded-xl bg-black/40">
+                             <input 
+                               type="text" 
+                               value={aiPrompt} 
+                               onChange={(e) => setAiPrompt(e.target.value)} 
+                               placeholder="Tema hayal et..." 
+                               className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 outline-none mb-4"
+                               disabled={!gameState.isVip}
+                             />
+                             <button 
+                               onClick={handleUpdateTheme}
+                               className={`w-full py-3 rounded-lg font-bold text-sm shadow-lg ${gameState.isVip ? 'bg-gradient-to-r from-indigo-600 to-purple-600' : 'bg-white/5 text-white/20'}`}
+                             >
+                               {isAiLoading ? '...' : 'OLUŞTUR'}
+                             </button>
+                        </div>
+                   </div>
+                   
+                   <div className="space-y-4">
+                       <h3 className="text-xl font-bold">Promosyon Kodu</h3>
+                       <div className="glass-panel p-4 rounded-xl bg-black/40 flex flex-col gap-4">
+                           <input 
+                             type="text" 
+                             value={vipCode}
+                             onChange={(e) => setVipCode(e.target.value)}
+                             placeholder="Kodu giriniz" 
+                             className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-3 text-sm outline-none"
+                           />
+                           <button onClick={applyVipCode} className="w-full py-3 bg-yellow-500 text-black font-bold rounded-lg hover:bg-yellow-400 text-sm">KULLAN</button>
+                       </div>
+                   </div>
+               </div>
+           </div>
+      );
+
+      if (activeTab === 'leaderboard') return (
+            <div className={`w-full glass-panel ${isMobile ? 'p-4 rounded-2xl' : 'p-10 rounded-[3rem] h-[80vh] overflow-y-auto no-scrollbar'} border border-white/10`}>
+                <div className="flex justify-between items-end mb-6">
+                    <h2 className={`${isMobile ? 'text-2xl' : 'text-5xl'} font-black font-['Orbitron']`}>LİDERLER</h2>
+                    <div className="flex gap-1 bg-white/5 p-1 rounded-lg">
+                        <button onClick={() => setLeaderboardType('GLOBAL')} className={`px-3 py-1 text-xs rounded-md font-bold ${leaderboardType === 'GLOBAL' ? 'bg-cyan-500 text-black' : 'text-white/50'}`}>GENEL</button>
+                        <button onClick={() => setLeaderboardType('VIP')} className={`px-3 py-1 text-xs rounded-md font-bold ${leaderboardType === 'VIP' ? 'bg-yellow-500 text-black' : 'text-white/50'}`}>VIP</button>
+                    </div>
+                </div>
+                
+                <div className="space-y-2">
+                    {getFilteredLeaderboard().map((entry, idx) => (
+                        <div key={entry.id} className="glass-panel p-3 rounded-xl flex items-center gap-4 hover:bg-white/5 transition-colors">
+                            <div className="text-xl font-black w-8 text-center text-white/30">{idx + 1}</div>
+                            <div className="text-2xl">{entry.avatar}</div>
+                            <div className="flex-1 overflow-hidden">
+                                <div className="text-sm font-bold truncate">{entry.name} {entry.isVip && '👑'}</div>
+                                <div className="text-xs opacity-50">{COUNTRIES.find(c => c.code === entry.country)?.name}</div>
+                            </div>
+                            <div className="text-lg font-black text-cyan-400 font-['Orbitron']">{entry.score.toLocaleString()}</div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+      );
+
+      return (
+            <div className={`glass-panel ${isMobile ? 'p-6 rounded-2xl' : 'p-12 rounded-[3rem]'} text-center max-w-2xl mx-auto`}>
+                <h2 className="text-2xl font-bold mb-4">{activeTab === 'account' ? 'PROFİL' : 'DESTEK'}</h2>
+                {activeTab === 'account' && !session && (
+                    <div className="mt-4 flex flex-col gap-3">
+                        <input className="p-3 rounded-lg bg-white/5 border border-white/10" placeholder="E-Posta" value={email} onChange={e=>setEmail(e.target.value)} />
+                        <input className="p-3 rounded-lg bg-white/5 border border-white/10" type="password" placeholder="Şifre" value={password} onChange={e=>setPassword(e.target.value)} />
+                        <button onClick={handleAuth} className="p-3 bg-cyan-600 rounded-lg font-bold">Giriş Yap / Kayıt Ol</button>
+                    </div>
+                )}
+                {activeTab === 'account' && session && (
+                    <div className="mt-4">
+                        <div className="text-lg mb-4">Hoşgeldin, {session.user.user_metadata?.display_name}</div>
+                        <button onClick={handleLogout} className="px-6 py-2 bg-red-500/20 text-red-400 rounded-lg">Çıkış Yap</button>
+                    </div>
+                )}
+            </div>
+      );
+  }
 };
 
 // Desktop Nav Button
@@ -660,6 +744,17 @@ const NavButton: React.FC<{ active: boolean; onClick: () => void; icon: string; 
     <span className="text-2xl group-hover:scale-110 transition-transform">{icon}</span>
     <span className="font-bold tracking-wider text-sm">{label}</span>
   </button>
+);
+
+// Mobile Nav Button
+const MobileNavBtn: React.FC<{ active: boolean; onClick: () => void; icon: string; label: string }> = ({ active, onClick, icon, label }) => (
+    <button 
+      onClick={onClick} 
+      className={`flex flex-col items-center justify-center gap-1 w-full h-full active:scale-90 transition-transform ${active ? 'text-cyan-400' : 'text-white/30'}`}
+    >
+        <span className="text-2xl">{icon}</span>
+        <span className="text-[10px] font-bold">{label}</span>
+    </button>
 );
 
 export default App;
