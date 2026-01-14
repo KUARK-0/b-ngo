@@ -7,6 +7,8 @@ export interface ThemeConfig {
   icons: Record<BlockColor, string>;
   gradients: Record<BlockColor, string>;
   name: string;
+  backgroundUrl?: string; // Temanın arka plan görseli (Base64 veya URL)
+  imagePrompt?: string;   // Arka planı yeniden oluşturmak için kullanılan prompt
 }
 
 export interface Piece {

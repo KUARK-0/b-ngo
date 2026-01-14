@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { GridCell, Piece, GameState, BlockColor, ThemeConfig, CountryCode } from './types';
-import { GRID_SIZE, SHAPES, COLOR_MAP, FEEDBACK_PHRASES, INITIAL_BACKGROUND, COUNTRIES, MOCK_LEADERBOARD, VIP_REWARDS } from './constants';
+import { GridCell, Piece, GameState, BlockColor, ThemeConfig, CountryCode, LeaderboardEntry } from './types';
+import { GRID_SIZE, SHAPES, COLOR_MAP, FEEDBACK_PHRASES, INITIAL_BACKGROUND, COUNTRIES, VIP_REWARDS } from './constants';
 import BlockPiece from './components/BlockPiece';
 import { generateGameBackground, generateThemeConfig } from './services/geminiService';
 import { supabase } from './services/supabaseClient';
@@ -47,7 +47,11 @@ const App: React.FC = () => {
   const [vipCode, setVipCode] = useState("");
   const [isBingo, setIsBingo] = useState(false);
   
+  // Theme Storage State
+  const [savedThemes, setSavedThemes] = useState<ThemeConfig[]>([]);
+
   // Leaderboard State
+  const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
   const [selectedCountry, setSelectedCountry] = useState<CountryCode>('GLOBAL');
   const [isCountryMenuOpen, setIsCountryMenuOpen] = useState(false);
   const [leaderboardType, setLeaderboardType] = useState<'GLOBAL' | 'VIP'>('GLOBAL');
@@ -65,34 +69,112 @@ const App: React.FC = () => {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [displayName, setDisplayName] = useState(''); // Yeni: Kullanıcı Adı
+  const [displayName, setDisplayName] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   
   const gridRef = useRef<HTMLDivElement>(null);
   const feedbackTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Initialize Supabase Session
+  // --- THEME STORAGE LOAD ---
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session?.user?.user_metadata?.display_name) {
-        setDisplayName(session.user.user_metadata.display_name);
+    try {
+      const storedThemes = localStorage.getItem('savedThemes');
+      if (storedThemes) {
+        setSavedThemes(JSON.parse(storedThemes));
       }
-    });
+    } catch (e) {
+      console.error("Tema yükleme hatası:", e);
+    }
+  }, []);
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      if (session?.user?.user_metadata?.display_name) {
-        setDisplayName(session.user.user_metadata.display_name);
-      }
+  // --- AUTH & SCORE SYNC ---
+  useEffect(() => {
+    // Session kontrolü
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      handleSessionUpdate(session);
+    };
+
+    checkSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: string, session: any) => {
+      handleSessionUpdate(session);
     });
 
     // @ts-ignore
     return () => subscription?.unsubscribe && subscription.unsubscribe();
   }, []);
+
+  // Liderlik Tablosunu Yükle
+  const fetchLeaderboard = useCallback(async () => {
+      const { data } = await supabase.from('profiles').select('*');
+      if (data) {
+          // Gelen veriyi LeaderboardEntry formatına dönüştür
+          const entries: LeaderboardEntry[] = data.map((u: any) => ({
+              id: u.id,
+              name: u.display_name,
+              score: u.high_score,
+              country: u.country as CountryCode,
+              avatar: u.avatar,
+              isVip: u.isVip
+          }));
+          // Puana göre sırala
+          setLeaderboardData(entries.sort((a, b) => b.score - a.score));
+      }
+  }, []);
+
+  // Leaderboard sekmesine geçince veriyi yenile
+  useEffect(() => {
+      if (activeTab === 'leaderboard') {
+          fetchLeaderboard();
+      }
+  }, [activeTab, fetchLeaderboard]);
+
+  // Oturum açıldığında veya değiştiğinde çalışır
+  const handleSessionUpdate = (session: any) => {
+    setSession(session);
+    if (session?.user?.user_metadata) {
+      const { display_name, high_score, isVip } = session.user.user_metadata;
+      
+      // İsmi güncelle
+      if (display_name) setDisplayName(display_name);
+      
+      // VIP Durumunu Senkronize Et (Hesaptan -> Uygulamaya)
+      if (isVip && !localStorage.getItem('isVip')) {
+          localStorage.setItem('isVip', 'true');
+          setGameState(prev => ({ 
+              ...prev, 
+              isVip: true,
+              // Eğer yeni VIP olduysa varsayılan temayı yükle
+              themeConfig: prev.isVip ? prev.themeConfig : DEFAULT_THEME,
+              backgroundUrl: prev.isVip ? prev.backgroundUrl : INITIAL_BACKGROUND
+          }));
+      }
+      
+      // Skoru senkronize et (Eğer veritabanındaki skor, yerelden yüksekse onu al)
+      if (high_score && high_score > parseInt(localStorage.getItem('highScore') || '0')) {
+        localStorage.setItem('highScore', high_score.toString());
+        setGameState(prev => ({ ...prev, highScore: high_score }));
+      }
+    }
+  };
+
+  // Yeni rekor kırıldığında veritabanına kaydet
+  const saveHighScoreToCloud = async (newHighScore: number) => {
+    if (!session) return;
+    
+    // Sadece skor artmışsa güncelleme isteği at
+    const currentCloudScore = session.user.user_metadata?.high_score || 0;
+    if (newHighScore > currentCloudScore) {
+      await supabase.auth.updateUser({
+        data: { high_score: newHighScore }
+      });
+      // Leaderboard verisini arka planda güncelle (Eğer o an leaderboard açıksa)
+      fetchLeaderboard(); 
+    }
+  };
+  // -------------------------
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,24 +182,38 @@ const App: React.FC = () => {
     
     try {
       if (authMode === 'register') {
-        const { error } = await supabase.auth.signUp({
+        // İsim girmeyi zorunlu kıl (veya varsayılan ata)
+        const nameToRegister = email.split('@')[0];
+        
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
             data: {
-              display_name: email.split('@')[0], // Varsayılan isim
+              display_name: nameToRegister,
+              high_score: gameState.highScore, // Mevcut skoru kaydet
+              name_changed: false, // İlk başta isim değiştirilmedi olarak işaretle
+              isVip: gameState.isVip // Eğer kayıt olurken zaten VIP ise kaydet
             }
           }
         });
         if (error) throw error;
+        
+        // Garanti olsun diye manuel güncelleme
+        if (data?.session) handleSessionUpdate(data.session);
+
         showFeedback("KAYIT BAŞARILI! HOŞGELDİN.", true);
         setActiveTab('game');
       } else {
-        const { error } = await supabase.auth.signInWithPassword({
+        const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
         if (error) throw error;
+        
+        // Garanti olsun diye manuel güncelleme
+        if (data?.session) handleSessionUpdate(data.session);
+
         showFeedback("GİRİŞ BAŞARILI! HOŞGELDİN.", true);
         setActiveTab('game');
       }
@@ -132,13 +228,16 @@ const App: React.FC = () => {
     if (!displayName.trim()) return;
     setAuthLoading(true);
     try {
+      // İsim değiştirildi olarak işaretle (name_changed: true)
       const { data, error } = await supabase.auth.updateUser({
-        data: { display_name: displayName }
+        data: { 
+          display_name: displayName,
+          name_changed: true 
+        }
       });
       
       if (error) throw error;
       
-      // Update local state immediately to reflect changes
       if (data?.user) {
          setSession({ ...session, user: data.user });
       }
@@ -155,7 +254,8 @@ const App: React.FC = () => {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setDisplayName('');
-    showFeedback("ÇIKIŞ YAPILDI", false);
+    showFeedback("HESAP DEĞİŞTİRİLDİ", false);
+    // Çıkış yapınca otomatik olarak login formuna düşer (session null olduğu için)
   };
 
   const generateNewPieces = useCallback(() => {
@@ -182,7 +282,6 @@ const App: React.FC = () => {
     setIsBingo(false);
   }, [generateNewPieces]);
 
-  // Restart Game Function (Full Reset)
   const restartGame = useCallback(() => {
     initializeGame();
   }, [initializeGame]);
@@ -280,6 +379,15 @@ const App: React.FC = () => {
     }
 
     const newScore = gameState.score + (piece.shape.flat().filter(x => x).length * 10) + (clearedCount * 120);
+    
+    // Yüksek skor kontrolü
+    let updatedHighScore = gameState.highScore;
+    if (newScore > gameState.highScore) {
+      updatedHighScore = newScore;
+      localStorage.setItem('highScore', newScore.toString());
+      saveHighScoreToCloud(newScore); // Buluta kaydet
+    }
+
     setGameState(prev => ({
       ...prev,
       grid: newGrid,
@@ -287,10 +395,6 @@ const App: React.FC = () => {
       highScore: Math.max(newScore, prev.highScore),
       availablePieces: prev.availablePieces.filter(p => p.id !== piece.id)
     }));
-
-    if (newScore > gameState.highScore) {
-      localStorage.setItem('highScore', newScore.toString());
-    }
 
     setTimeout(() => {
       setGameState(prev => {
@@ -313,11 +417,39 @@ const App: React.FC = () => {
       const { config, imagePrompt } = await generateThemeConfig(aiPrompt);
       const backgroundUrl = await generateGameBackground(imagePrompt);
       
+      const newThemeConfig: ThemeConfig = {
+          ...config,
+          imagePrompt,
+          backgroundUrl
+      };
+
       setGameState(prev => ({ 
         ...prev, 
-        themeConfig: config,
+        themeConfig: newThemeConfig,
         backgroundUrl: backgroundUrl
       }));
+      
+      // Temayı listeye kaydet
+      setSavedThemes(prev => {
+          const newThemes = [newThemeConfig, ...prev].slice(0, 10); // Son 10 tema
+          
+          try {
+              localStorage.setItem('savedThemes', JSON.stringify(newThemes));
+              return newThemes;
+          } catch (e) {
+              // Depolama alanı dolduysa, arka planı (büyük veriyi) çıkarıp kaydetmeyi dene
+              console.warn("Storage Full - Saving without background data");
+              const safeTheme = { ...newThemeConfig, backgroundUrl: undefined };
+              const safeThemes = [safeTheme, ...prev].slice(0, 10);
+              try {
+                  localStorage.setItem('savedThemes', JSON.stringify(safeThemes));
+                  return safeThemes;
+              } catch (e2) {
+                  return prev; // Hiçbir şey yapılamadı
+              }
+          }
+      });
+
       setAiPrompt("");
       setActiveTab('game');
       showFeedback(`${config.name.toUpperCase()} TEMASI HAZIR!`, true);
@@ -328,7 +460,44 @@ const App: React.FC = () => {
     }
   };
 
-  const applyVipCode = () => {
+  const handleSelectTheme = async (theme: ThemeConfig) => {
+      // 1. Temayı hemen uygula (ikonlar, renkler)
+      setGameState(prev => ({
+          ...prev,
+          themeConfig: theme,
+          backgroundUrl: theme.backgroundUrl || prev.backgroundUrl
+      }));
+
+      // 2. Eğer arka plan silinmişse (depolama tasarrufu için), yeniden oluştur
+      if (!theme.backgroundUrl && theme.imagePrompt) {
+          showFeedback("ARKA PLAN OLUŞTURULUYOR...", false);
+          try {
+              const newBg = await generateGameBackground(theme.imagePrompt);
+              setGameState(prev => {
+                  // Kullanıcı bu arada başka tema seçmediyse uygula
+                  if (prev.themeConfig.name === theme.name) {
+                      return { ...prev, backgroundUrl: newBg };
+                  }
+                  return prev;
+              });
+          } catch (e) {
+              console.error("BG Regen Error", e);
+          }
+      } else {
+          showFeedback(`${theme.name.toUpperCase()} YÜKLENDİ`, true);
+      }
+  };
+
+  const handleDeleteTheme = (e: React.MouseEvent, index: number) => {
+      e.stopPropagation();
+      setSavedThemes(prev => {
+          const updated = prev.filter((_, i) => i !== index);
+          localStorage.setItem('savedThemes', JSON.stringify(updated));
+          return updated;
+      });
+  };
+
+  const applyVipCode = async () => {
     if (vipCode === "babapromen") {
       setGameState(prev => ({ 
         ...prev, 
@@ -337,6 +506,14 @@ const App: React.FC = () => {
         backgroundUrl: INITIAL_BACKGROUND
       }));
       localStorage.setItem('isVip', 'true');
+      
+      // VIP kodunu hesaba da işle
+      if (session) {
+          await supabase.auth.updateUser({
+              data: { isVip: true }
+          });
+      }
+
       showFeedback("VIP AKTİF EDİLDİ! 👑", true);
       setVipCode("");
     } else {
@@ -345,38 +522,21 @@ const App: React.FC = () => {
   };
 
   const getFilteredLeaderboard = () => {
-    let list;
+    let list = leaderboardData; // Artık sahte veri yerine state kullanıyoruz
     
+    // Eğer veri henüz gelmediyse boş dön
+    if (!list) list = [];
+
     if (leaderboardType === 'VIP') {
-      list = MOCK_LEADERBOARD.filter(p => p.isVip);
+      list = list.filter(p => p.isVip);
     } else {
       list = selectedCountry === 'GLOBAL' 
-        ? MOCK_LEADERBOARD 
-        : MOCK_LEADERBOARD.filter(p => p.country === selectedCountry);
+        ? list 
+        : list.filter(p => p.country === selectedCountry);
     }
     
-    // Geçerli kullanıcıyı listeye ekle
-    // Eğer session varsa user_metadata'daki display_name'i kullan, yoksa emailin başını kullan
-    const currentUserName = session?.user?.user_metadata?.display_name || 
-                            (session ? session.user.email.split('@')[0] : 'SEN');
-
-    const userEntry = { 
-      id: 'user', 
-      name: currentUserName, 
-      score: gameState.highScore, 
-      country: 'TR' as CountryCode, 
-      avatar: '👤',
-      isVip: gameState.isVip 
-    };
-
-    if (leaderboardType === 'VIP' && !gameState.isVip) {
-      // Gösterme
-    } else {
-      list = [...list, userEntry];
-    }
-    
-    const combined = list.sort((a, b) => b.score - a.score);
-    return combined.filter((v,i,a)=>a.findIndex(t=>(t.id === v.id))===i);
+    // Sıralama (Puan yüksekten düşüğe)
+    return list.sort((a, b) => b.score - a.score);
   };
 
   const isMobile = window.innerWidth < 768;
@@ -486,8 +646,8 @@ const App: React.FC = () => {
                  <p className="text-white/40 text-xs font-black uppercase tracking-widest">Oyuncu Profili</p>
                  {/* @ts-ignore */}
                  {supabase.isMock && (
-                     <span className="text-[9px] bg-orange-500/20 text-orange-400 border border-orange-500/50 px-2 py-0.5 rounded uppercase font-bold">
-                         Yerel Mod
+                     <span className="text-[9px] bg-white/10 text-white/40 border border-white/10 px-2 py-0.5 rounded uppercase font-bold">
+                         Çevrimdışı Mod
                      </span>
                  )}
               </div>
@@ -497,12 +657,13 @@ const App: React.FC = () => {
               // LOGGED IN VIEW
               <div className="bg-white/5 backdrop-blur-3xl rounded-[2.5rem] p-8 border border-white/10 flex flex-col items-center text-center">
                  <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-600 mb-4 flex items-center justify-center text-4xl shadow-[0_0_30px_rgba(6,182,212,0.4)]">
-                    👤
+                    {session.user.user_metadata?.avatar || '👤'}
                  </div>
                  
                  {/* Profile Name Edit Section */}
                  {isEditingProfile ? (
                    <div className="w-full mb-4 space-y-2">
+                     <p className="text-[10px] text-red-400 font-bold uppercase tracking-wide">Dikkat: Sadece 1 kez değiştirilebilir!</p>
                      <input 
                         type="text" 
                         value={displayName}
@@ -519,7 +680,18 @@ const App: React.FC = () => {
                  ) : (
                    <div className="flex items-center gap-2 mb-1 justify-center relative w-full">
                      <h3 className="text-2xl font-bold">{session.user.user_metadata?.display_name || 'İsimsiz Oyuncu'}</h3>
-                     <button onClick={() => setIsEditingProfile(true)} className="text-white/40 hover:text-white transition-colors text-sm">✏️</button>
+                     {/* Check if name has already been changed */}
+                     {!session.user.user_metadata?.name_changed ? (
+                        <button 
+                            onClick={() => setIsEditingProfile(true)} 
+                            className="w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-xs transition-colors"
+                            title="İsmi Düzenle"
+                        >
+                            ✏️
+                        </button>
+                     ) : (
+                        <span className="text-white/30 text-sm" title="İsim değiştirme hakkı doldu">🔒</span>
+                     )}
                    </div>
                  )}
 
@@ -538,14 +710,14 @@ const App: React.FC = () => {
 
                  <button 
                   onClick={handleLogout}
-                  className="w-full py-4 bg-white/10 hover:bg-red-500/20 hover:text-red-400 border border-white/10 hover:border-red-500/50 rounded-2xl font-bold transition-all"
+                  className="w-full py-4 bg-white/10 hover:bg-red-500/20 hover:text-red-400 border border-white/10 hover:border-red-500/50 rounded-2xl font-bold transition-all text-sm"
                  >
-                   ÇIKIŞ YAP 🚪
+                   HESAP DEĞİŞTİR
                  </button>
               </div>
             ) : (
               // LOGIN / REGISTER FORM
-              <div className="bg-white/5 backdrop-blur-3xl rounded-[2.5rem] p-8 border border-white/10 shadow-2xl">
+              <div className="bg-white/5 backdrop-blur-3xl rounded-[2.5rem] p-8 border border-white/10 shadow-2xl animate-in fade-in zoom-in-95 duration-300">
                  <div className="flex bg-black/40 rounded-xl p-1 mb-6">
                     <button 
                       onClick={() => setAuthMode('login')}
@@ -729,15 +901,24 @@ const App: React.FC = () => {
               )}
 
               <div className={`space-y-3 pb-24 ${leaderboardType === 'VIP' && !gameState.isVip ? 'opacity-20 pointer-events-none select-none' : ''}`}>
+                 {/* Eğer liste boşsa mesaj göster */}
+                 {getFilteredLeaderboard().length === 0 && (
+                     <div className="text-center py-10 opacity-50">
+                         <span className="text-3xl block mb-2">📉</span>
+                         Henüz sıralamada kimse yok.
+                     </div>
+                 )}
+
                 {getFilteredLeaderboard().map((entry, index) => {
                   const rewardItem = leaderboardType === 'VIP' && index < 10 ? VIP_REWARDS.find(r => r.rank >= index + 1) : null;
+                  const isCurrentUser = session?.user?.user_metadata?.display_name === entry.name;
 
                   return (
                     <div 
                       key={entry.id} 
                       className={`
                         flex items-center gap-4 p-4 rounded-2xl border transition-all
-                        ${entry.id === 'user' ? 'bg-gradient-to-r from-cyan-900/40 to-blue-900/40 border-cyan-500/50 scale-[1.02] shadow-[0_0_20px_rgba(6,182,212,0.2)]' : 'bg-white/5 border-white/5'}
+                        ${isCurrentUser ? 'bg-gradient-to-r from-cyan-900/40 to-blue-900/40 border-cyan-500/50 scale-[1.02] shadow-[0_0_20px_rgba(6,182,212,0.2)]' : 'bg-white/5 border-white/5'}
                         ${leaderboardType === 'VIP' ? 'border-yellow-500/10 bg-gradient-to-r from-yellow-900/10 to-transparent' : ''}
                       `}
                     >
@@ -752,8 +933,8 @@ const App: React.FC = () => {
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
                           <span className="text-lg">{entry.avatar}</span>
-                          <span className={`font-bold ${entry.id === 'user' ? 'text-cyan-400' : 'text-white'}`}>{entry.name}</span>
-                          {entry.id === 'user' && <span className="text-[9px] bg-cyan-500 text-black px-1.5 rounded font-black">SEN</span>}
+                          <span className={`font-bold ${isCurrentUser ? 'text-cyan-400' : 'text-white'}`}>{entry.name}</span>
+                          {isCurrentUser && <span className="text-[9px] bg-cyan-500 text-black px-1.5 rounded font-black">SEN</span>}
                           {entry.isVip && <span className="text-[10px]">👑</span>}
                         </div>
                         <div className="flex items-center gap-1 opacity-50 text-xs">
@@ -882,6 +1063,45 @@ const App: React.FC = () => {
                   </button>
                </div>
             </div>
+
+            {/* Saved Themes Section */}
+            {gameState.isVip && savedThemes.length > 0 && (
+                <div className="space-y-4">
+                    <div className="flex items-center gap-2 px-2">
+                        <span className="text-xl">💾</span>
+                        <h4 className="text-xs font-black uppercase tracking-widest text-white/60">Kayıtlı Temalarım</h4>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-3">
+                        {savedThemes.map((theme, idx) => (
+                            <div 
+                                key={idx} 
+                                onClick={() => handleSelectTheme(theme)}
+                                className="group relative bg-white/5 hover:bg-white/10 border border-white/10 hover:border-cyan-400/50 rounded-2xl p-3 cursor-pointer transition-all active:scale-95 overflow-hidden"
+                            >
+                                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                    <button 
+                                        onClick={(e) => handleDeleteTheme(e, idx)}
+                                        className="w-6 h-6 rounded-full bg-red-500/20 hover:bg-red-500 text-red-200 hover:text-white flex items-center justify-center text-xs font-bold"
+                                    >
+                                        ✕
+                                    </button>
+                                </div>
+                                
+                                {/* Mini Preview Gradient */}
+                                <div className={`h-16 rounded-xl mb-3 bg-gradient-to-br ${theme.gradients.pink} shadow-inner flex items-center justify-center`}>
+                                    <span className="text-2xl drop-shadow-md">{theme.icons.pink}</span>
+                                </div>
+                                
+                                <div className="flex items-center justify-between">
+                                    <span className="text-xs font-bold truncate max-w-[80px]">{theme.name}</span>
+                                    {theme.name === gameState.themeConfig.name && <span className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_5px_rgba(34,197,94,0.8)]"></span>}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* VIP Code Section */}
             <div className="bg-slate-900/40 rounded-[2.5rem] p-8 border border-white/5">
