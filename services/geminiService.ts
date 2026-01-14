@@ -2,9 +2,26 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ThemeConfig, BlockColor } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Lazy initialization: İstemci sadece ihtiyaç duyulduğunda oluşturulur
+let aiClient: GoogleGenAI | null = null;
+
+const getAi = () => {
+  if (!aiClient) {
+    const apiKey = process.env.API_KEY;
+    // API Key yoksa hata fırlatmak yerine güvenli bir şekilde uyarı ver, ama uygulamayı çökertme
+    if (!apiKey) {
+      console.warn("API Key eksik! AI özellikleri çalışmayacak.");
+      return null;
+    }
+    aiClient = new GoogleGenAI({ apiKey });
+  }
+  return aiClient;
+};
 
 export const generateThemeConfig = async (userPrompt: string): Promise<{ config: ThemeConfig, imagePrompt: string }> => {
+  const ai = getAi();
+  if (!ai) throw new Error("API Key eksik.");
+
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: `Act as a master game UI/UX designer. Create a COMPLETE game theme for: "${userPrompt}". 
@@ -56,7 +73,7 @@ export const generateThemeConfig = async (userPrompt: string): Promise<{ config:
     }
   });
 
-  const result = JSON.parse(response.text);
+  const result = JSON.parse(response.text || '{}');
   return {
     config: {
       name: userPrompt,
@@ -69,6 +86,9 @@ export const generateThemeConfig = async (userPrompt: string): Promise<{ config:
 
 export const generateGameBackground = async (prompt: string, currentImageBase64?: string): Promise<string> => {
   try {
+    const ai = getAi();
+    if (!ai) return "https://images.unsplash.com/photo-1614850523296-d8c1af93d400?auto=format&fit=crop&q=80&w=1000";
+
     const contents = currentImageBase64 ? {
       parts: [
         { inlineData: { data: currentImageBase64.split(',')[1], mimeType: 'image/png' } },
